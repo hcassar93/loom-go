@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Recordings (not part of repo)
+*.mp4
+*.mov
+*.avi
+*.wav
+
+# Config files (contain bucket names)
+.screen-go-config.json
+
+# Temporary files
+*.log
+*.tmp
+
