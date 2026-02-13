@@ -31,9 +31,175 @@ local audioGain = 0.5  -- Audio gain multiplier (0.1 to 2.0, default 0.5 = 50% t
 
 -- Composite video settings
 local webcamPosition = "bottom-right"  -- Options: bottom-left, bottom-right, top-left, top-right
-local webcamSizePercent = 20  -- Webcam size as percentage of screen width
+local webcamSizePercent = 25  -- Webcam size as percentage of screen width (default: 25%)
 local webcamPadding = 20  -- Padding from screen edges in pixels
 local webcamCircleCrop = true  -- Crop webcam to circle in composite
+
+-- Preview overlay reference
+local previewOverlay = nil
+local screenPreviewOverlay = nil
+
+-- Show webcam size preview on screen
+local function showWebcamPreview(sizePercent, autoDismiss)
+    if autoDismiss == nil then autoDismiss = true end
+    
+    -- Remove any existing preview
+    if previewOverlay then
+        previewOverlay:delete()
+        previewOverlay = nil
+    end
+    
+    if sizePercent == 0 then
+        -- Show "Off" message
+        hs.alert.show("📷 Webcam: Off", 2)
+        return
+    end
+    
+    local screen = hs.screen.mainScreen()
+    local frame = screen:fullFrame()
+    
+    -- Calculate webcam size
+    local webcamWidth = math.floor(frame.w * (sizePercent / 100))
+    local webcamHeight = webcamWidth  -- Square for circle
+    
+    -- Calculate position based on webcamPosition
+    local x, y
+    if webcamPosition == "bottom-right" then
+        x = frame.x + frame.w - webcamWidth - webcamPadding
+        y = frame.y + frame.h - webcamHeight - webcamPadding
+    elseif webcamPosition == "bottom-left" then
+        x = frame.x + webcamPadding
+        y = frame.y + frame.h - webcamHeight - webcamPadding
+    elseif webcamPosition == "top-right" then
+        x = frame.x + frame.w - webcamWidth - webcamPadding
+        y = frame.y + webcamPadding
+    else -- top-left
+        x = frame.x + webcamPadding
+        y = frame.y + webcamPadding
+    end
+    
+    -- Create semi-transparent circle overlay
+    previewOverlay = hs.canvas.new({x = x, y = y, w = webcamWidth, h = webcamHeight})
+    previewOverlay:insertElement({
+        type = "circle",
+        action = "strokeAndFill",
+        strokeColor = {red = 0.4, green = 0.5, blue = 0.9, alpha = 0.8},
+        fillColor = {red = 0.4, green = 0.5, blue = 0.9, alpha = 0.2},
+        strokeWidth = 4,
+        frame = {x = "0%", y = "0%", w = "100%", h = "100%"}
+    })
+    previewOverlay:insertElement({
+        type = "text",
+        text = sizePercent .. "%",
+        textSize = webcamWidth / 5,
+        textColor = {white = 1, alpha = 0.9},
+        textAlignment = "center",
+        frame = {x = "0%", y = "40%", w = "100%", h = "20%"}
+    })
+    previewOverlay:show()
+    
+    -- Auto-hide after 2 seconds (if autoDismiss is true)
+    if autoDismiss then
+        hs.timer.doAfter(2, function()
+            if previewOverlay then
+                previewOverlay:delete()
+                previewOverlay = nil
+            end
+        end)
+    end
+end
+
+-- Dismiss webcam preview manually
+local function dismissWebcamPreview()
+    if previewOverlay then
+        previewOverlay:delete()
+        previewOverlay = nil
+    end
+end
+
+-- Show screen selection border preview
+local function showScreenPreview(screenId, autoDismiss)
+    if autoDismiss == nil then autoDismiss = true end
+    
+    -- Remove any existing preview
+    if screenPreviewOverlay then
+        screenPreviewOverlay:delete()
+        screenPreviewOverlay = nil
+    end
+    
+    -- Find the screen object
+    local screen = nil
+    for _, s in ipairs(availableScreens) do
+        if s.id == screenId then
+            screen = s
+            break
+        end
+    end
+    
+    if not screen then
+        print("ERROR: Screen not found for preview")
+        return
+    end
+    
+    -- Get the screen's frame
+    local hsScreen = hs.screen.find(screen.id)
+    if not hsScreen then
+        print("ERROR: Could not find Hammerspoon screen object")
+        return
+    end
+    
+    local frame = hsScreen:fullFrame()
+    
+    -- Create border overlay with thick colored border
+    screenPreviewOverlay = hs.canvas.new(frame)
+    
+    -- Add border rectangle
+    local borderWidth = 10
+    screenPreviewOverlay:insertElement({
+        type = "rectangle",
+        action = "stroke",
+        strokeColor = {red = 0.2, green = 0.8, blue = 0.3, alpha = 0.9},
+        strokeWidth = borderWidth,
+        frame = {x = 0, y = 0, w = frame.w, h = frame.h}
+    })
+    
+    -- Add screen name at top center
+    screenPreviewOverlay:insertElement({
+        type = "rectangle",
+        action = "fill",
+        fillColor = {red = 0.2, green = 0.8, blue = 0.3, alpha = 0.8},
+        frame = {x = (frame.w / 2) - 150, y = 20, w = 300, h = 50}
+    })
+    
+    screenPreviewOverlay:insertElement({
+        type = "text",
+        text = screen.name,
+        textSize = 24,
+        textColor = {white = 1, alpha = 1},
+        textAlignment = "center",
+        frame = {x = (frame.w / 2) - 150, y = 25, w = 300, h = 40}
+    })
+    
+    screenPreviewOverlay:show()
+    
+    -- Auto-hide after 2 seconds (if autoDismiss is true)
+    if autoDismiss then
+        hs.timer.doAfter(2, function()
+            if screenPreviewOverlay then
+                screenPreviewOverlay:delete()
+                screenPreviewOverlay = nil
+            end
+        end)
+    end
+end
+
+-- Dismiss screen preview manually
+local function dismissScreenPreview()
+    if screenPreviewOverlay then
+        screenPreviewOverlay:delete()
+        screenPreviewOverlay = nil
+    end
+end
 
 -- Load configuration from file
 local function loadConfig()
@@ -52,8 +218,10 @@ local function loadConfig()
             quickUrlEnabled = config.quickUrlEnabled ~= false  -- Default true
             audioGain = config.audioGain or 0.5  -- Default 50% to prevent clipping
             webcamPosition = config.webcamPosition or "bottom-right"
-            webcamSizePercent = config.webcamSizePercent or 20
+            webcamSizePercent = config.webcamSizePercent or 25
             webcamCircleCrop = config.webcamCircleCrop ~= false  -- Default true
+            selectedCameraDevice = config.selectedCameraDevice  -- Can be nil
+            selectedAudioDevice = config.selectedAudioDevice or ":0"
             
             -- If bucket is configured but autoUpload is false, enable it
             if gcsBucket ~= "" and not autoUpload then
@@ -79,7 +247,9 @@ local function saveConfig()
         audioGain = audioGain,
         webcamPosition = webcamPosition,
         webcamSizePercent = webcamSizePercent,
-        webcamCircleCrop = webcamCircleCrop
+        webcamCircleCrop = webcamCircleCrop,
+        selectedCameraDevice = selectedCameraDevice,
+        selectedAudioDevice = selectedAudioDevice
     }
     
     local content = hs.json.encode(config)
@@ -279,11 +449,17 @@ function screenRecorder.enumerateCameras()
         table.insert(availableCameras, {index = nil, name = "No Camera"})
     end
     
-    -- Set default camera
+    -- Set default camera (first available real camera)
     if not selectedCameraDevice and #availableCameras > 0 then
-        selectedCameraDevice = availableCameras[1].index
-        currentCameraName = availableCameras[1].name
-        print("Set default camera: [" .. tostring(selectedCameraDevice) .. "] " .. currentCameraName)
+        -- Find first camera that's not nil
+        for _, cam in ipairs(availableCameras) do
+            if cam.index ~= nil then
+                selectedCameraDevice = cam.index
+                currentCameraName = cam.name
+                print("Set default camera: [" .. tostring(selectedCameraDevice) .. "] " .. currentCameraName)
+                break
+            end
+        end
     end
     
     return availableCameras
@@ -381,16 +557,35 @@ function screenRecorder.startRecording()
     }
     
     print("Screen recording command (VIDEO ONLY): " .. ffmpegPath .. " " .. table.concat(screenArgs, " "))
+    print("Screen recording output file: " .. screenFile)
+    
+    -- Verify output directory exists and is writable
+    local dirCheck = hs.execute("test -d '" .. screenRecorder.recordingFolder .. "' && test -w '" .. screenRecorder.recordingFolder .. "' && echo 'OK' || echo 'FAIL'")
+    print("Output directory check: " .. dirCheck:trim())
     
     screenRecorder.screenTask = hs.task.new(ffmpegPath, 
         function(exitCode, stdOut, stdErr)
-            print("Screen recording stopped with exit code: " .. exitCode)
+            print("🔴 Screen recording stopped with exit code: " .. tostring(exitCode))
+            if stdOut and stdOut ~= "" then
+                print("Screen recording stdout: " .. stdOut)
+            end
             if stdErr and stdErr ~= "" then
                 print("Screen recording stderr: " .. stdErr)
             end
         end,
         screenArgs
     )
+    
+    -- Set streaming callback to capture errors in real-time
+    screenRecorder.screenTask:setStreamingCallback(function(task, stdOut, stdErr)
+        if stdOut and stdOut ~= "" then
+            print("⚠️ Screen stdout: " .. stdOut)
+        end
+        if stdErr and stdErr ~= "" then
+            print("⚠️ Screen stderr: " .. stdErr)
+        end
+        return true
+    end)
     
     -- Start AUDIO recording with SOX (clean audio, no distortion)
     local audioDeviceIndex = selectedAudioDevice:match(":(%d+)") or "0"
@@ -408,12 +603,23 @@ function screenRecorder.startRecording()
     screenRecorder.audioTask = hs.task.new("/opt/homebrew/bin/rec",
         function(exitCode, stdOut, stdErr)
             print("Audio recording stopped with exit code: " .. exitCode)
+            if stdOut and stdOut ~= "" then
+                print("Audio recording stdout: " .. stdOut)
+            end
             if stdErr and stdErr ~= "" then
                 print("Audio recording stderr: " .. stdErr)
             end
         end,
         audioArgs
     )
+    
+    -- Set streaming callback to capture errors in real-time
+    screenRecorder.audioTask:setStreamingCallback(function(task, stdOut, stdErr)
+        if stdErr and stdErr ~= "" then
+            print("⚠️ Audio recording: " .. stdErr)
+        end
+        return true
+    end)
     
     -- Setup webcam recording if camera is selected
     local webcamTask = nil
@@ -438,47 +644,143 @@ function screenRecorder.startRecording()
         screenRecorder.webcamTask = hs.task.new(ffmpegPath,
             function(exitCode, stdOut, stdErr)
                 print("Webcam recording stopped with exit code: " .. exitCode)
+                if stdOut and stdOut ~= "" then
+                    print("Webcam recording stdout: " .. stdOut)
+                end
                 if stdErr and stdErr ~= "" then
                     print("Webcam recording stderr: " .. stdErr)
                 end
             end,
             webcamArgs
         )
+        
+        -- Set streaming callback to capture errors in real-time
+        screenRecorder.webcamTask:setStreamingCallback(function(task, stdOut, stdErr)
+            if stdErr and stdErr ~= "" then
+                print("⚠️ Webcam recording: " .. stdErr)
+            end
+            return true
+        end)
     else
         print("No webcam selected, skipping webcam recording")
     end
     
-    -- START ALL TASKS SIMULTANEOUSLY for better sync
-    print("\n⏺️ STARTING ALL RECORDINGS SIMULTANEOUSLY...")
-    local screenStarted = screenRecorder.screenTask:start()
-    local audioStarted = screenRecorder.audioTask:start()
-    print("Screen task started: " .. tostring(screenStarted))
-    print("Audio task started: " .. tostring(audioStarted))
+    -- COUNTDOWN before starting all tasks simultaneously
+    print("\n⏺️ STARTING COUNTDOWN...")
     
-    if screenRecorder.webcamTask then
-        local webcamStarted = screenRecorder.webcamTask:start()
-        print("Webcam task started: " .. tostring(webcamStarted))
+    -- Show visual previews during countdown
+    showScreenPreview(selectedScreenId, false)  -- Don't auto-dismiss
+    if webcamSizePercent > 0 then
+        showWebcamPreview(webcamSizePercent, false)  -- Don't auto-dismiss
     end
     
-    screenRecorder.isRecording = true
-    hs.alert.show("⏺️ Recording started")
-    print("=== RECORDING IN PROGRESS ===\n")
+    hs.alert.show("⏺️ Recording in 3...")
     
-    -- Upload HTML placeholder in BACKGROUND (don't block the recording start)
-    if quickUrlEnabled and gcsBucket ~= "" and autoUpload then
-        local timestamp = os.date("%Y-%m-%d_%H-%M-%S")
-        local folderName = "recording_" .. timestamp
-        local compositeUrl = string.format(
-            "https://storage.googleapis.com/%s/%s/composite.%s",
-            gcsBucket, folderName, recordFormat
-        )
+    hs.timer.doAfter(1, function()
+        hs.alert.show("⏺️ Recording in 2...")
         
-        hs.timer.doAfter(0.1, function()  -- Small delay to not block recording start
-            print("\n⚡ UPLOADING PLACEHOLDER...")
+        hs.timer.doAfter(1, function()
+            hs.alert.show("⏺️ Recording in 1...")
             
-            -- Create HTML placeholder
-            local placeholderFile = screenRecorder.recordingFolder .. "/placeholder.html"
-            local placeholderContent = [[<!DOCTYPE html>
+            hs.timer.doAfter(1, function()
+                -- Dismiss previews before recording starts
+                dismissScreenPreview()
+                dismissWebcamPreview()
+                
+                -- START ALL TASKS SIMULTANEOUSLY for perfect sync
+                print("\n⏺️ STARTING ALL RECORDINGS SIMULTANEOUSLY...")
+                local screenStarted = screenRecorder.screenTask:start()
+                local audioStarted = screenRecorder.audioTask:start()
+                print("Screen task started: " .. tostring(screenStarted))
+                print("Audio task started: " .. tostring(audioStarted))
+                
+                -- Get PIDs immediately after starting
+                if screenStarted and screenRecorder.screenTask then
+                    local screenPid = screenRecorder.screenTask:pid()
+                    print("Screen task PID: " .. tostring(screenPid))
+                    if not screenPid or screenPid == 0 then
+                        print("❌ WARNING: Screen task has invalid PID!")
+                    end
+                end
+                
+                local webcamStarted = true
+                if screenRecorder.webcamTask then
+                    webcamStarted = screenRecorder.webcamTask:start()
+                    print("Webcam task started: " .. tostring(webcamStarted))
+                end
+                
+                -- Verify ALL tasks started successfully
+                if not screenStarted or not audioStarted or not webcamStarted then
+                    print("❌ ERROR: Failed to start one or more recording tasks!")
+                    print("  Screen: " .. tostring(screenStarted))
+                    print("  Audio: " .. tostring(audioStarted))
+                    print("  Webcam: " .. tostring(webcamStarted))
+                    
+                    -- Clean up any tasks that did start
+                    if screenRecorder.screenTask then screenRecorder.screenTask:interrupt() end
+                    if screenRecorder.audioTask then screenRecorder.audioTask:interrupt() end
+                    if screenRecorder.webcamTask then screenRecorder.webcamTask:interrupt() end
+                    
+                    screenRecorder.screenTask = nil
+                    screenRecorder.audioTask = nil
+                    screenRecorder.webcamTask = nil
+                    
+                    hs.alert.show("❌ Recording failed to start - check console")
+                    screenRecorder.updateMenuBar()
+                    return
+                end
+                
+                -- Double-check tasks are actually running after 1 second
+                hs.timer.doAfter(1, function()
+                    local screenRunning = screenRecorder.screenTask and screenRecorder.screenTask:isRunning()
+                    local audioRunning = screenRecorder.audioTask and screenRecorder.audioTask:isRunning()
+                    local webcamRunning = not screenRecorder.webcamTask or screenRecorder.webcamTask:isRunning()
+                    
+                    print("\n=== RECORDING STATUS CHECK (1s after start) ===")
+                    print("Screen task running: " .. tostring(screenRunning))
+                    print("Audio task running: " .. tostring(audioRunning))
+                    print("Webcam task running: " .. tostring(webcamRunning))
+                    
+                    if not screenRunning or not audioRunning or not webcamRunning then
+                        print("❌ ERROR: One or more tasks died after starting!")
+                        print("  This usually means:")
+                        print("  - Screen Recording permission not granted")
+                        print("  - Camera/Microphone permission not granted")
+                        print("  - FFmpeg or sox crashed")
+                        print("  Check Hammerspoon Console for error messages above")
+                        
+                        -- Stop everything
+                        if screenRecorder.isRecording then
+                            screenRecorder.stopRecording()
+                        end
+                        
+                        hs.alert.show("❌ Recording failed - check console for errors")
+                    else
+                        print("✅ All tasks confirmed running")
+                    end
+                    print("==============================================\n")
+                end)
+                
+                screenRecorder.isRecording = true
+                hs.alert.show("⏺️ RECORDING!")
+                print("=== RECORDING IN PROGRESS ===\n")
+                screenRecorder.updateMenuBar()
+                
+                -- Upload HTML placeholder in BACKGROUND AFTER recording has started
+                if quickUrlEnabled and gcsBucket ~= "" and autoUpload then
+                    -- Extract folder name from the existing recording folder path
+                    local folderName = screenRecorder.recordingFolder:match("([^/]+)$")
+                    local compositeUrl = string.format(
+                        "https://storage.googleapis.com/%s/%s/composite.%s",
+                        gcsBucket, folderName, recordFormat
+                    )
+                    
+                    hs.timer.doAfter(1, function()  -- Wait 1 sec after recording starts
+                        print("\n⚡ UPLOADING PLACEHOLDER...")
+                        
+                        -- Create HTML placeholder
+                        local placeholderFile = screenRecorder.recordingFolder .. "/placeholder.html"
+                        local placeholderContent = [[<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
@@ -546,33 +848,36 @@ function screenRecorder.startRecording()
     </div>
 </body>
 </html>]]
-            
-            local ph = io.open(placeholderFile, "w")
-            if ph then
-                ph:write(placeholderContent)
-                ph:close()
-                
-                -- Upload placeholder asynchronously
-                local placeholderCmd = string.format(
-                    "%s -h 'Content-Type:text/html' -h 'Cache-Control:no-cache, no-store, must-revalidate' cp '%s' 'gs://%s/%s/composite.%s' && %s acl ch -u AllUsers:R 'gs://%s/%s/composite.%s'",
-                    gsutilPath, placeholderFile, gcsBucket, folderName, recordFormat,
-                    gsutilPath, gcsBucket, folderName, recordFormat
-                )
-                
-                hs.task.new("/bin/sh", function(exitCode, stdout, stderr)
-                    print("Placeholder uploaded (exit: " .. exitCode .. ")")
-                    if exitCode == 0 then
-                        -- Copy URL to clipboard once placeholder is up
-                        hs.pasteboard.setContents(compositeUrl)
-                        print("✅ URL in clipboard: " .. compositeUrl)
-                    else
-                        print("Placeholder upload error: " .. stderr)
-                    end
-                    os.remove(placeholderFile)
-                end, {"-c", placeholderCmd}):start()
-            end
+                        
+                        local ph = io.open(placeholderFile, "w")
+                        if ph then
+                            ph:write(placeholderContent)
+                            ph:close()
+                            
+                            -- Upload placeholder asynchronously
+                            local placeholderCmd = string.format(
+                                "%s -h 'Content-Type:text/html' -h 'Cache-Control:no-cache, no-store, must-revalidate' cp '%s' 'gs://%s/%s/composite.%s' && %s acl ch -u AllUsers:R 'gs://%s/%s/composite.%s'",
+                                gsutilPath, placeholderFile, gcsBucket, folderName, recordFormat,
+                                gsutilPath, gcsBucket, folderName, recordFormat
+                            )
+                            
+                            hs.task.new("/bin/sh", function(exitCode, stdout, stderr)
+                                print("Placeholder uploaded (exit: " .. exitCode .. ")")
+                                if exitCode == 0 then
+                                    -- Copy URL to clipboard once placeholder is up
+                                    hs.pasteboard.setContents(compositeUrl)
+                                    print("✅ URL in clipboard: " .. compositeUrl)
+                                else
+                                    print("Placeholder upload error: " .. stderr)
+                                end
+                                os.remove(placeholderFile)
+                            end, {"-c", placeholderCmd}):start()
+                        end
+                    end)
+                end
+            end)
         end)
-    end
+    end)
     
     screenRecorder.updateMenuBar()
 end
@@ -586,35 +891,102 @@ function screenRecorder.stopRecording()
     
     print("\n=== STOPPING RECORDING ===")
     
-    -- Stop screen recording (send SIGINT to allow FFmpeg to finalize)
+    -- Stop ALL tasks SIMULTANEOUSLY at the exact same time
+    print("Stopping all recordings simultaneously...")
+    
+    local tasksToStop = {}
+    
     if screenRecorder.screenTask then
-        print("Sending SIGINT to screen recording task...")
-        screenRecorder.screenTask:interrupt()
-        screenRecorder.screenTask = nil
+        table.insert(tasksToStop, {task = screenRecorder.screenTask, name = "screen"})
     end
     
-    -- Stop webcam recording
-    if screenRecorder.webcamTask then
-        print("Sending SIGINT to webcam recording task...")
-        screenRecorder.webcamTask:interrupt()
-        screenRecorder.webcamTask = nil
+    if screenRecorder.audioTask then
+        table.insert(tasksToStop, {task = screenRecorder.audioTask, name = "audio"})
     end
+    
+    if screenRecorder.webcamTask then
+        table.insert(tasksToStop, {task = screenRecorder.webcamTask, name = "webcam"})
+    end
+    
+    -- Send stop signals to ALL tasks at once for perfect sync
+    -- Screen recording needs gentle stop to finalize MP4 properly
+    for _, taskInfo in ipairs(tasksToStop) do
+        local pid = taskInfo.task:pid()
+        if taskInfo.name == "screen" then
+            print("Sending SIGTERM to screen recording task (PID: " .. tostring(pid) .. ") for graceful stop...")
+            if pid then
+                os.execute("kill -15 " .. pid)  -- SIGTERM instead of SIGKILL
+            end
+        else
+            print("Sending SIGINT to " .. taskInfo.name .. " recording task (PID: " .. tostring(pid) .. ")...")
+            taskInfo.task:interrupt()
+        end
+    end
+    
+    -- Wait longer for screen FFmpeg to finalize the MP4 file properly
+    hs.timer.doAfter(3, function()
+        if screenRecorder.audioTask and screenRecorder.audioTask:isRunning() then
+            print("⚠️ Audio task still running after 3s, force killing...")
+            local pid = screenRecorder.audioTask:pid()
+            if pid then
+                os.execute("kill -9 " .. pid)
+            end
+        end
+        if screenRecorder.webcamTask and screenRecorder.webcamTask:isRunning() then
+            print("⚠️ Webcam task still running after 3s, force killing...")
+            local pid = screenRecorder.webcamTask:pid()
+            if pid then
+                os.execute("kill -9 " .. pid)
+            end
+        end
+        if screenRecorder.screenTask and screenRecorder.screenTask:isRunning() then
+            print("⚠️ Screen task still running after 3s, force killing (will corrupt file)...")
+            local pid = screenRecorder.screenTask:pid()
+            if pid then
+                os.execute("kill -9 " .. pid)
+            end
+        end
+        print("All recording tasks stopped.")
+    end)
+    
+    -- Clear task references
+    screenRecorder.screenTask = nil
+    screenRecorder.audioTask = nil
+    screenRecorder.webcamTask = nil
     
     screenRecorder.isRecording = false
     hs.alert.show("⏹️ Processing... URL in clipboard")
     
     print("Waiting for FFmpeg to finalize files...")
     
-    -- Wait for files to finish writing
-    hs.timer.doAfter(3, function()
+    -- Wait for files to finish writing (10 seconds - MP4 finalization takes time)
+    hs.timer.doAfter(10, function()
         print("\n=== MUXING AUDIO + VIDEO ===")
         local screenVideoFile = screenRecorder.recordingFolder .. "/screen_video_only.mp4"
         local audioFile = screenRecorder.recordingFolder .. "/audio.wav"
         local screenFile = screenRecorder.recordingFolder .. "/screen." .. recordFormat
         local webcamFile = screenRecorder.recordingFolder .. "/webcam." .. recordFormat
         
-        -- Rename the video-only file
-        os.execute("mv '" .. screenFile .. "' '" .. screenVideoFile .. "' 2>&1")
+        -- Check if screen.mp4 exists BEFORE trying to rename it
+        print("Checking for screen file: " .. screenFile)
+        local screenFileExists = hs.execute("test -f '" .. screenFile .. "' && echo 'YES' || echo 'NO'")
+        print("Screen file exists before rename: " .. screenFileExists:trim())
+        
+        if screenFileExists:trim() == "YES" then
+            local screenFileSize = hs.execute("ls -lh '" .. screenFile .. "' 2>&1")
+            print("Screen file details: " .. screenFileSize:trim())
+        else
+            print("❌ Screen file was never created by FFmpeg!")
+            print("Listing all files in recording folder:")
+            local allFiles = hs.execute("ls -lha '" .. screenRecorder.recordingFolder .. "/' 2>&1")
+            print(allFiles)
+        end
+        
+        -- Rename the video-only file (only if it exists)
+        if screenFileExists:trim() == "YES" then
+            local mvResult = os.execute("mv '" .. screenFile .. "' '" .. screenVideoFile .. "' 2>&1")
+            print("Rename result: " .. tostring(mvResult))
+        end
         
         -- Keep raw audio for debugging
         local rawWavBackup = screenRecorder.recordingFolder .. "/audio_raw.wav"
@@ -705,8 +1077,8 @@ function screenRecorder.stopRecording()
         print("Webcam exists: " .. tostring(webcamExists))
         print("==============================\n")
         
-        -- Create composite video if webcam was recorded
-        if selectedCameraDevice and selectedCameraDevice ~= "nil" and screenExists and webcamExists then
+        -- Create composite video if webcam was recorded AND webcam is enabled
+        if webcamSizePercent > 0 and selectedCameraDevice and selectedCameraDevice ~= "nil" and screenExists and webcamExists then
             print("Both files exist, creating composite...")
             screenRecorder.createComposite(function(success)
                 -- No alerts here - just process silently
@@ -722,7 +1094,12 @@ function screenRecorder.stopRecording()
                 screenRecorder.updateMenuBar()
             end)
         elseif screenExists then
-            print("Only screen recording exists (no webcam), skipping composite")
+            print("Only screen recording exists (no webcam or webcam disabled), skipping composite")
+            -- Copy screen.mp4 to composite.mp4 so upload can proceed
+            local screenFile = screenRecorder.recordingFolder .. "/screen." .. recordFormat
+            local compositeFile = screenRecorder.recordingFolder .. "/composite." .. recordFormat
+            os.execute("cp '" .. screenFile .. "' '" .. compositeFile .. "'")
+            
             hs.alert.show("✅ Screen recording saved")
             -- No webcam, just upload
             if autoUpload and gcsBucket ~= "" then
@@ -919,18 +1296,28 @@ function screenRecorder.uploadToGCS()
             if not compositeCheck:match("NOT FOUND") then
                 print("✓ Composite ready, uploading real video to replace placeholder...")
                 
-                -- Upload real composite (overwrites placeholder)
+                -- First, delete the old placeholder to ensure clean replacement
+                local deleteCmd = string.format(
+                    "%s rm 'gs://%s/%s/composite.%s' 2>&1 || echo 'No file to delete'",
+                    gsutilPath, gcsBucket, folderName, recordFormat
+                )
+                print("Deleting placeholder: " .. deleteCmd)
+                hs.execute(deleteCmd)
+                
+                -- Upload real composite with proper video headers and no-cache
                 local compositeCmd = string.format(
-                    "%s -h 'Cache-Control:public, max-age=3600' cp '%s' 'gs://%s/%s/composite.%s'",
-                    gsutilPath, compositeFile, gcsBucket, folderName, recordFormat
+                    "%s -h 'Content-Type:video/mp4' -h 'Cache-Control:no-cache, no-store, must-revalidate' cp '%s' 'gs://%s/%s/composite.%s' && %s acl ch -u AllUsers:R 'gs://%s/%s/composite.%s'",
+                    gsutilPath, compositeFile, gcsBucket, folderName, recordFormat,
+                    gsutilPath, gcsBucket, folderName, recordFormat
                 )
                 
                 print("Real upload command: " .. compositeCmd)
                 local uploadOutput = hs.execute(compositeCmd .. " 2>&1")
                 print("Real upload output: " .. uploadOutput)
                 
-                hs.alert.show("✅ Video uploaded!")
-                print("✅ Real composite uploaded successfully")
+                hs.alert.show("✅ Video uploaded! Open URL in new tab")
+                print("✅ Real composite uploaded successfully and made public")
+                print("📝 Open the URL in a NEW browser tab (don't refresh old one)")
             elseif uploadAttempts < maxUploadAttempts then
                 print("⚠️ Composite not ready yet (attempt " .. uploadAttempts .. "/" .. maxUploadAttempts .. "), waiting...")
                 hs.timer.doAfter(2, uploadRealComposite)
@@ -1033,6 +1420,7 @@ function screenRecorder.updateMenuBar()
                 selectedScreenId = screen.id
                 currentScreenName = screen.name
                 screenRecorder.updateMenuBar()
+                showScreenPreview(screen.id)
             end
         })
     end
@@ -1054,6 +1442,7 @@ function screenRecorder.updateMenuBar()
                 selectedCameraDevice = camera.index
                 currentCameraName = camera.name
                 print("Selected camera: [" .. tostring(camera.index) .. "] " .. camera.name)
+                saveConfig()
                 screenRecorder.updateMenuBar()
             end
         })
@@ -1076,6 +1465,7 @@ function screenRecorder.updateMenuBar()
                 selectedAudioDevice = ":" .. audio.index
                 currentAudioName = audio.name
                 print("Selected audio: [" .. tostring(audio.index) .. "] " .. audio.name)
+                saveConfig()
                 screenRecorder.updateMenuBar()
             end
         })
@@ -1132,11 +1522,39 @@ function screenRecorder.updateMenuBar()
     -- Webcam size
     local sizeMenu = {
         {
+            title = (webcamSizePercent == 0 and "✓ " or "   ") .. "Off (No Webcam)",
+            fn = function()
+                webcamSizePercent = 0
+                saveConfig()
+                screenRecorder.updateMenuBar()
+                showWebcamPreview(0)
+            end
+        },
+        {
+            title = (webcamSizePercent == 5 and "✓ " or "   ") .. "Tiny (5%)",
+            fn = function()
+                webcamSizePercent = 5
+                saveConfig()
+                screenRecorder.updateMenuBar()
+                showWebcamPreview(5)
+            end
+        },
+        {
+            title = (webcamSizePercent == 10 and "✓ " or "   ") .. "Mini (10%)",
+            fn = function()
+                webcamSizePercent = 10
+                saveConfig()
+                screenRecorder.updateMenuBar()
+                showWebcamPreview(10)
+            end
+        },
+        {
             title = (webcamSizePercent == 15 and "✓ " or "   ") .. "Small (15%)",
             fn = function()
                 webcamSizePercent = 15
                 saveConfig()
                 screenRecorder.updateMenuBar()
+                showWebcamPreview(15)
             end
         },
         {
@@ -1145,6 +1563,7 @@ function screenRecorder.updateMenuBar()
                 webcamSizePercent = 20
                 saveConfig()
                 screenRecorder.updateMenuBar()
+                showWebcamPreview(20)
             end
         },
         {
@@ -1153,6 +1572,7 @@ function screenRecorder.updateMenuBar()
                 webcamSizePercent = 25
                 saveConfig()
                 screenRecorder.updateMenuBar()
+                showWebcamPreview(25)
             end
         },
         {
@@ -1161,12 +1581,22 @@ function screenRecorder.updateMenuBar()
                 webcamSizePercent = 30
                 saveConfig()
                 screenRecorder.updateMenuBar()
+                showWebcamPreview(30)
+            end
+        },
+        {
+            title = (webcamSizePercent == 35 and "✓ " or "   ") .. "Huge (35%)",
+            fn = function()
+                webcamSizePercent = 35
+                saveConfig()
+                screenRecorder.updateMenuBar()
+                showWebcamPreview(35)
             end
         }
     }
     
     table.insert(menuItems, {
-        title = "📏 Webcam Size: " .. webcamSizePercent .. "%",
+        title = "📏 Webcam Size: " .. (webcamSizePercent == 0 and "Off" or webcamSizePercent .. "%"),
         menu = sizeMenu
     })
     
